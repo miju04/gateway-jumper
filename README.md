@@ -4,6 +4,8 @@ SPDX-FileCopyrightText: 2023 Deutsche Telekom AG
 SPDX-License-Identifier: CC0-1.0    
 -->
 
+test
+
 # Jumper
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -125,6 +127,7 @@ The following describes different scenarios for token handling in Jumper.
 The most common scenario where Jumper creates a new OAuth token by combining information from the incoming token and headers.
 
 **Required Headers:**
+
 * `remote_api_url` - Target URL for request forwarding
 * `api_base_path` - Base path of the Kong service in the initial zone. Passed as `requestPath` claim.
 * `realm` - Used to set the correct issuer
@@ -159,6 +162,7 @@ The most common scenario where Jumper creates a new OAuth token by combining inf
 ```
 
 **Outgoing Headers:**
+
 * `Authorization` - Contains the newly created token
 
 #### Last Mile Security Token (Legacy)
@@ -166,6 +170,7 @@ The most common scenario where Jumper creates a new OAuth token by combining inf
 A legacy scenario where Jumper forwards both the original token and a new LMS token (in an `X-Gateway-Token` header).
 
 **Required Headers:**
+
 * Same as One Token scenario, but with `access_token_forwarding` set to `true`
 
 **Structure of LMS Token:**
@@ -196,6 +201,7 @@ A legacy scenario where Jumper forwards both the original token and a new LMS to
 ```
 
 **Outgoing Headers:**
+
 * `Authorization` - Original incoming token
 * `X-Gateway-Token` - New LMS token
 
@@ -210,12 +216,14 @@ Mesh tokens are cached, so fetching is performed only if a valid token is not av
 ![mesh flow!](pictures/jumper2_mesh.png "mesh flow")
 
 **Required Headers:**
+
 * `remote_api_url` - URL (including service base path) of the other zone's Gateway, to which the request is forwarded
 * `issuer` - Issuer of the other zone's identity provider
 * `client_id` - Client ID for dedicated client on the other zone's identity provider
 * `client_secret` - Client secret for dedicated client on the other zone's identity provider
 
 **Outgoing Headers:**
+
 * `Authorization` - Mesh token
 * `Consumer-Token` - Original incoming token
 
@@ -226,6 +234,7 @@ Jumper forwards requests with tokens fetched from provider-defined identity prov
 ![oauth flow!](pictures/jumper3_external.png "oauth flow")
 
 **Required Headers:**
+
 * `remote_api_url` - Target URL
 * `token_endpoint` - Endpoint of external identity provider
 * `client_id` - Client ID for external identity provider
@@ -249,6 +258,7 @@ If credentials differ per consumer, the following `jumper_config` can be used in
 Supports legacy systems requiring Basic Authorization (Spacegate only). Authorization can be defined globally for a provider, or on a per consumer basis.
 
 **Required Headers:**
+
 * `remote_api_url` - Target URL
 * `jumper_config` - Contains Basic Auth configuration with the following format:
 
@@ -276,6 +286,7 @@ When a consumer sets the `X-Token-Exchange` header containing an external provid
 Spectre allows a third-party listener application to monitor communication between consumer and provider for specific APIs.
 
 **Prerequisites:**
+
 * Configured `jumper.horizon.publishEventUrl` in application properties
 * Properly configured `jumper_config` header with listener settings
 
@@ -348,11 +359,13 @@ The following describes the different types of routes implemented in Jumper.
 Routes are implemented using varying sets of filters. Here is a short overview:
 
 Filters for standard processing:
+
 * `RequestFilter` - Main processing logic
 * `RemoveRequestHeaderFilter` - Removes headers used for passing information from Kong to Jumper
 * `ResponseFilter` - Minor tracing adjustments
 
 Spectre-specific filters:
+
 * `RequestTransformationFilter` - Transforms request body
 * `SpectreRequestFilter` - Creates Spectre request event (if configured for given consumer/provider combination)
 * `ResponseTransformationFilter` - Transforms response body
