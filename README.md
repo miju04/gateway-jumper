@@ -16,6 +16,7 @@ It is based on [Spring Cloud Gateway](https://spring.io/projects/spring-cloud-ga
 Its purpose is mainly advanced token (OAuth 2.0) handling, enabling support for:
 
 * Mesh functionality
+* TEST
 * External authorization
 * Gateway token generation
 * Header customization
