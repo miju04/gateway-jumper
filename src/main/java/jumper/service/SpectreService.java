@@ -4,7 +4,6 @@
 
 package jumper.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import java.util.HashMap;
@@ -18,7 +17,6 @@ import jumper.model.config.RouteListener;
 import jumper.model.config.Spectre;
 import jumper.model.config.SpectreData;
 import jumper.model.config.SpectreKind;
-import jumper.util.ObjectMapperUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,6 +34,8 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 @Slf4j
 @Service
@@ -44,6 +44,7 @@ public class SpectreService {
 
   private final TokenGeneratorService tokenGeneratorService;
   private final Tracer tracer;
+  private final ObjectMapper objectMapper;
 
   @Qualifier("spectreServiceWebClient")
   private final WebClient spectreServiceWebClient;
@@ -83,8 +84,7 @@ public class SpectreService {
 
     if (http instanceof ServerHttpRequest) {
       Map<String, String> httpHeaders = new HashMap<>(rq.getHeaders().toSingleValueMap());
-      httpHeaders.replace(Constants.HEADER_AUTHORIZATION, jc.getConsumerToken());
-      httpHeaders.remove(Constants.HEADER_CONSUMER_TOKEN);
+      httpHeaders.remove(Constants.HEADER_AUTHORIZATION);
       data.setHeader(httpHeaders);
       data.setKind(SpectreKind.REQUEST.toString());
       data.setPayload(parsePayload(rq.getHeaders().getContentType(), payload));
@@ -94,6 +94,7 @@ public class SpectreService {
       spanName = ("Spectre response");
 
       Map<String, String> httpHeaders = new HashMap<>(rs.getHeaders().toSingleValueMap());
+      httpHeaders.remove(Constants.HEADER_AUTHORIZATION);
       httpHeaders.put(
           Constants.HEADER_X_TARDIS_TRACE_ID,
           rq.getHeaders().getFirst(Constants.HEADER_X_TARDIS_TRACE_ID));
@@ -133,8 +134,7 @@ public class SpectreService {
 
   private Mono<Void> publishEvent(Spectre event, JumperConfig jc) {
 
-    // determine environment for local issuer and routing path on qa
-    String envName = determineEnvironment(jc);
+    String envName = jc.getRealmName();
 
     return publishEventMono(
             publishEventUrl.replaceFirst(Constants.ENVIRONMENT_PLACEHOLDER, envName),
@@ -146,17 +146,6 @@ public class SpectreService {
               log.error("Error publishing Spectre event", throwable);
               return Mono.empty(); // Don't fail the main request flow
             });
-  }
-
-  private String determineEnvironment(JumperConfig jc) {
-
-    // should be always available
-    if (jc.getGatewayClient().getIssuer() != null) {
-      return jc.getGatewayClient().getIssuer().replaceFirst(".*realms/", "");
-    }
-
-    // as a fallback value we use realm already defined within jumper config
-    return jc.getRealmName();
   }
 
   private Mono<Void> publishEventMono(String url, String token, Spectre event) {
@@ -227,8 +216,8 @@ public class SpectreService {
       log.debug("json compatible content-type, will try to parse as json payload");
       try {
         // try to return payload as json
-        return ObjectMapperUtil.getInstance().readTree(payload);
-      } catch (JsonProcessingException e) {
+        return objectMapper.readTree(payload);
+      } catch (JacksonException e) {
         log.error("error while parsing json payload for spectre", e);
       }
     }

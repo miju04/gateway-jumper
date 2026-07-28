@@ -12,6 +12,7 @@ import io.cucumber.java.en.Then;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwt;
 import java.util.Base64;
+import java.util.Set;
 import java.util.regex.Pattern;
 import jumper.util.OauthTokenUtil;
 import lombok.RequiredArgsConstructor;
@@ -93,6 +94,34 @@ public class VerificationSteps {
     this.baseSteps.getRequestExchange().expectHeader().doesNotExist("routing_config");
   }
 
+  @Then("API Provider receives documented standard and consumer headers")
+  public void apiProviderReceivesDocumentedHeaders() {
+    this.baseSteps
+        .getRequestExchange()
+        .expectHeader()
+        .valueMatches(Constants.HEADER_X_B3_TRACE_ID, "\\w+")
+        .expectHeader()
+        .valueMatches(Constants.HEADER_X_B3_SPAN_ID, "\\w+")
+        .expectHeader()
+        .valueEquals(Constants.HEADER_X_B3_SAMPLED, "1")
+        .expectHeader()
+        .valueEquals(Constants.HEADER_X_FORWARDED_HOST, "zone.local.de")
+        .expectHeader()
+        .valueEquals(Constants.HEADER_X_FORWARDED_PORT, Constants.HEADER_X_FORWARDED_PORT_PORT)
+        .expectHeader()
+        .valueEquals(Constants.HEADER_X_FORWARDED_PROTO, Constants.HEADER_X_FORWARDED_PROTO_HTTPS)
+        .expectHeader()
+        .valueEquals(Constants.HEADER_X_FORWARDED_FOR, FORWARDED_FOR)
+        .expectHeader()
+        .valueEquals(Constants.HEADER_X_FORWARDED_PATH, FORWARDED_PATH)
+        .expectHeader()
+        .valueEquals(Constants.HEADER_REALM, REALM)
+        .expectHeader()
+        .valueEquals(Constants.HEADER_ENVIRONMENT, ENVIRONMENT)
+        .expectHeader()
+        .valueEquals(CUSTOM_CONSUMER_HEADER, CUSTOM_CONSUMER_HEADER_VALUE);
+  }
+
   @Then("API Provider receives no authorization header")
   public void apiProvidersReceivesNoAuthorizationHeader() {
     this.baseSteps.getRequestExchange().expectHeader().doesNotExist("Authorization");
@@ -131,13 +160,27 @@ public class VerificationSteps {
           .value(HttpHeaders.AUTHORIZATION, this::checkOneToken)
           .expectHeader()
           .value(HttpHeaders.AUTHORIZATION, this::checkAud);
+    } else if (tokenType.equalsIgnoreCase("OneTokenWithMultipleAud")) {
+      this.baseSteps
+          .getRequestExchange()
+          .expectHeader()
+          .value(HttpHeaders.AUTHORIZATION, this::checkOneToken)
+          .expectHeader()
+          .value(HttpHeaders.AUTHORIZATION, this::checkMultipleAud);
     } else if (tokenType.equalsIgnoreCase("MeshToken")) {
       this.baseSteps
           .getRequestExchange()
           .expectHeader()
           .value(HttpHeaders.AUTHORIZATION, this::checkMeshToken)
           .expectHeader()
-          .valueMatches(Constants.HEADER_CONSUMER_TOKEN, "Bearer " + baseSteps.authHeader);
+          .doesNotExist(Constants.HEADER_CONSUMER_TOKEN);
+    } else if (tokenType.equalsIgnoreCase("MeshTokenWithNonDefaultRealm")) {
+      this.baseSteps
+          .getRequestExchange()
+          .expectHeader()
+          .value(HttpHeaders.AUTHORIZATION, this::checkMeshTokenWithNonDefaultRealm)
+          .expectHeader()
+          .doesNotExist(Constants.HEADER_CONSUMER_TOKEN);
     } else if (tokenType.equalsIgnoreCase("ExternalConfigured")) {
       this.baseSteps
           .getRequestExchange()
@@ -181,8 +224,6 @@ public class VerificationSteps {
         .expectHeader()
         .valueMatches(Constants.HEADER_X_B3_SPAN_ID, Pattern.compile("\\w+").pattern())
         .expectHeader()
-        .valueMatches(Constants.HEADER_X_B3_PARENT_SPAN_ID, Pattern.compile("\\w+").pattern())
-        .expectHeader()
         .valueMatches(Constants.HEADER_X_B3_SAMPLED, "1")
         .expectHeader()
         .valueMatches(Constants.HEADER_X_ORIGIN_STARGATE, ORIGIN_STARGATE)
@@ -196,9 +237,8 @@ public class VerificationSteps {
         .valueMatches(Constants.HEADER_X_FORWARDED_PROTO, Constants.HEADER_X_FORWARDED_PROTO_HTTPS);
   }
 
-  private void checkOneToken(String token) {
-    Jwt<?, Claims> claimsFromToken =
-        OauthTokenUtil.getAllClaimsFromToken(OauthTokenUtil.getTokenWithoutSignature(token));
+  private void checkOneToken(String providerLmsToken) {
+    Jwt<?, Claims> claimsFromToken = OauthTokenUtil.getAllClaimsFromToken(providerLmsToken);
 
     assertEquals("Bearer", claimsFromToken.getBody().get("typ", String.class));
     assertEquals(CONSUMER, claimsFromToken.getBody().get("clientId", String.class));
@@ -215,9 +255,8 @@ public class VerificationSteps {
     assertNotNull(claimsFromToken.getBody().getIssuedAt());
   }
 
-  private void checkOneTokenSimple(String token) {
-    Jwt<?, Claims> claimsFromToken =
-        OauthTokenUtil.getAllClaimsFromToken(OauthTokenUtil.getTokenWithoutSignature(token));
+  private void checkOneTokenSimple(String providerLmsToken) {
+    Jwt<?, Claims> claimsFromToken = OauthTokenUtil.getAllClaimsFromToken(providerLmsToken);
 
     assertEquals("Bearer", claimsFromToken.getBody().get("typ", String.class));
     assertEquals(CONSUMER, claimsFromToken.getBody().get("clientId", String.class));
@@ -232,48 +271,64 @@ public class VerificationSteps {
     assertNotNull(claimsFromToken.getBody().getIssuedAt());
   }
 
-  private void checkPubSub(String token) {
-    Jwt<?, Claims> claimsFromToken =
-        OauthTokenUtil.getAllClaimsFromToken(OauthTokenUtil.getTokenWithoutSignature(token));
+  private void checkPubSub(String providerLmsToken) {
+    Jwt<?, Claims> claimsFromToken = OauthTokenUtil.getAllClaimsFromToken(providerLmsToken);
 
     assertEquals(PUBSUB_PUBLISHER, claimsFromToken.getBody().get("publisherId", String.class));
     assertEquals(PUBSUB_SUBSCRIBER, claimsFromToken.getBody().get("subscriberId", String.class));
-    assertEquals(PUBSUB_SUBSCRIBER, claimsFromToken.getBody().get("aud", String.class));
+    assertEquals(Set.of(PUBSUB_SUBSCRIBER), claimsFromToken.getBody().getAudience());
   }
 
-  private void checkScopes(String token) {
-    Jwt<?, Claims> claimsFromToken =
-        OauthTokenUtil.getAllClaimsFromToken(OauthTokenUtil.getTokenWithoutSignature(token));
+  private void checkScopes(String providerLmsToken) {
+    Jwt<?, Claims> claimsFromToken = OauthTokenUtil.getAllClaimsFromToken(providerLmsToken);
 
     assertEquals(SCOPES, claimsFromToken.getBody().get("scope", String.class));
   }
 
-  private void checkAud(String token) {
-    Jwt<?, Claims> claimsFromToken =
-        OauthTokenUtil.getAllClaimsFromToken(OauthTokenUtil.getTokenWithoutSignature(token));
+  private void checkAud(String providerLmsToken) {
+    Jwt<?, Claims> claimsFromToken = OauthTokenUtil.getAllClaimsFromToken(providerLmsToken);
 
-    assertEquals("testAudience", claimsFromToken.getBody().get("aud", String.class));
+    assertEquals(Set.of("testAudience"), claimsFromToken.getBody().getAudience());
   }
 
-  private void checkMeshToken(String token) {
-    Jwt<?, Claims> claimsFromToken =
-        OauthTokenUtil.getAllClaimsFromToken(OauthTokenUtil.getTokenWithoutSignature(token));
+  private void checkMultipleAud(String providerLmsToken) {
+    Jwt<?, Claims> claimsFromToken = OauthTokenUtil.getAllClaimsFromToken(providerLmsToken);
+
+    assertEquals(Set.of("testAudience1", "testAudience2"), claimsFromToken.getBody().getAudience());
+  }
+
+  private void checkMeshToken(String meshLmsToken) {
+    checkMeshToken(meshLmsToken, Constants.DEFAULT_REALM);
+  }
+
+  private void checkMeshTokenWithNonDefaultRealm(String meshLmsToken) {
+    checkMeshToken(meshLmsToken, NON_DEFAULT_REALM);
+  }
+
+  private void checkMeshToken(String meshLmsToken, String expectedRealm) {
+    Jwt<?, Claims> claimsFromToken = OauthTokenUtil.getAllClaimsFromToken(meshLmsToken);
 
     assertEquals("Bearer", claimsFromToken.getBody().get("typ", String.class));
-    assertEquals(CONSUMER_GATEWAY, claimsFromToken.getBody().get("clientId", String.class));
+    // Mesh LMS token carries the real consumer identity, not the "gateway" client
+    assertEquals(CONSUMER, claimsFromToken.getBody().get("clientId", String.class));
+    // azp is "gateway" so the provider-zone ACL group check passes
     assertEquals(CONSUMER_GATEWAY, claimsFromToken.getBody().get("azp", String.class));
-    assertEquals(ENVIRONMENT_REMOTE, claimsFromToken.getBody().get("env", String.class));
-    assertEquals(ORIGIN_ZONE_REMOTE, claimsFromToken.getBody().get("originZone", String.class));
-    assertEquals(
-        ORIGIN_STARGATE_REMOTE, claimsFromToken.getBody().get("originStargate", String.class));
-    assertEquals(REMOTE_ISSUER, claimsFromToken.getBody().getIssuer());
+    // env is absent: proxy route headers (TokenUtil.getProxyRouteHeaders) do not include
+    // `environment`. The null-guard in generateLmsToken ensures the claim is omitted rather
+    // than written as null.
+    assertNull(claimsFromToken.getBody().get("env", String.class));
+    assertEquals("GET", claimsFromToken.getBody().get("operation", String.class));
+    // originZone and originStargate come from the consumer token, not the remote zone
+    assertEquals(ORIGIN_ZONE, claimsFromToken.getBody().get("originZone", String.class));
+    assertEquals(ORIGIN_STARGATE, claimsFromToken.getBody().get("originStargate", String.class));
+    // iss is the local StarGate issuer URL — the provider zone validates against its JWKS
+    assertEquals(localIssuerUrl + "/" + expectedRealm, claimsFromToken.getBody().getIssuer());
     assertNotNull(claimsFromToken.getBody().getExpiration());
     assertNotNull(claimsFromToken.getBody().getIssuedAt());
   }
 
   private void checkExternalConfigured(String token) {
-    Jwt<?, Claims> claimsFromToken =
-        OauthTokenUtil.getAllClaimsFromToken(OauthTokenUtil.getTokenWithoutSignature(token));
+    Jwt<?, Claims> claimsFromToken = OauthTokenUtil.getAllClaimsFromToken(token);
 
     assertEquals(
         CONSUMER_EXTERNAL_CONFIGURED, claimsFromToken.getBody().get("clientId", String.class));
@@ -281,16 +336,14 @@ public class VerificationSteps {
   }
 
   private void checkAlternativeClient(String token) {
-    Jwt<?, Claims> claimsFromToken =
-        OauthTokenUtil.getAllClaimsFromToken(OauthTokenUtil.getTokenWithoutSignature(token));
+    Jwt<?, Claims> claimsFromToken = OauthTokenUtil.getAllClaimsFromToken(token);
 
     assertEquals("alternative_client", claimsFromToken.getBody().get("clientId", String.class));
     assertEquals(REMOTE_ISSUER, claimsFromToken.getBody().getIssuer());
   }
 
   private void checkExternalHeader(String token) {
-    Jwt<?, Claims> claimsFromToken =
-        OauthTokenUtil.getAllClaimsFromToken(OauthTokenUtil.getTokenWithoutSignature(token));
+    Jwt<?, Claims> claimsFromToken = OauthTokenUtil.getAllClaimsFromToken(token);
 
     assertEquals(CONSUMER_EXTERNAL_HEADER, claimsFromToken.getBody().get("clientId", String.class));
     assertEquals(REMOTE_ISSUER, claimsFromToken.getBody().getIssuer());

@@ -4,23 +4,18 @@
 
 name: Build
 
-# Required secrets (repository level):
-# - REGISTRY_TOKEN: Container registry token/password
-# - COSIGN_PASSWORD: Cosign key password
-# - COSIGN_PRIVATE_KEY: Cosign private key for image signing
-# - COSIGN_PUBLIC_KEY: Cosign public key for signature verification
+# Required environment setup:
+# Variables:
+# - REGISTRY_HOST: Container registry host (e.g. artifactory.devops.telekom.de)
+# - REGISTRY_REPO: Repository path (e.g. /tardis-oci-local/tardis/components/gateway/jumper)
+# - JAVA_VERSION: Java version to use (defaults to '25' if not specified)
+# - JAVA_DISTRIBUTION: Java distribution to use (defaults to 'temurin' if not specified)
+# - BASE_IMAGE: The base image used for the container build (defaults to gcr.io/distroless/java25-debian13:nonroot)
 #
-# Required variables (repository level):
-# - REGISTRY_HOST: Container registry host (e.g. mtr.devops.telekom.de)
-# - REGISTRY_REPO: Repository path (e.g. /tardis-internal/gateway/jumper-sse)
-# - REGISTRY_USER: Container registry username
-# - BASE_IMAGE: The base image used for the container build (defaults to gcr.io/distroless/java21-debian12:nonroot)
-# - JAVA_VERSION: Java version to use (defaults to '21' if not specified)
-# - JAVA_DISTRIBUTION: Java distribution to use (defaults to 'zulu' if not specified)
-#
-# Required GitHub environment:
-# - "external": Configured with required reviewers. Used as an approval gate
-#   for fork PRs in the push-image workflow before pushing with secrets.
+# Required secrets:
+# - ARTIFACTORY_O28M_PUSH_USER: Container registry username
+# - ARTIFACTORY_O28M_PUSH_TOKEN: Container registry token/password
+# - OSPO_ORT_ARTIFACTORY_CACHE_REPO_KEY: Token for accessing ORT repository
 
 on:
   pull_request:
@@ -39,7 +34,7 @@ permissions:
   contents: read
 
 env:
-  JAVA_VERSION: ${{ vars.JAVA_VERSION || '21' }}
+  JAVA_VERSION: ${{ vars.JAVA_VERSION || '25' }}
   JAVA_DISTRIBUTION: ${{ vars.JAVA_DISTRIBUTION || 'zulu' }}
 
 jobs:
@@ -48,9 +43,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 #v7.0.0
       - name: Set up JDK
-        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 #v5.2.0
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 #v5.6.0
         with:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           java-version: ${{ env.JAVA_VERSION }}
@@ -64,62 +59,226 @@ jobs:
     outputs:
       version: ${{ steps.extract-version.outputs.version }}
     steps:
-      - name: Skip for testing
-        run: |
-          echo "Skipping build for testing purposes"
-          echo "Cache key would be: ${{ runner.os }}-maven-target-${{ github.event.pull_request.head.sha || github.sha }}"
-          mkdir target
-          echo "test artifact" > target/test-artifact.txt
-      #     - name: Checkout
-      #       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
-      #     - name: Set up JDK
-      #       uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 #v5.2.0
-      #       with:
-      #         distribution: ${{ env.JAVA_DISTRIBUTION }}
-      #         java-version: ${{ env.JAVA_VERSION }}
-      #         cache: "maven"
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 #v7.0.0
+      - name: Set up JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 #v5.6.0
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: "maven"
       - name: Cache maven target dir
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae #v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 #v6.1.0
+        with:
+          path: target
+          key: ${{ runner.os }}-maven-target-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-maven-target-${{ github.sha }}
+      - name: Build with Maven
+        run: |
+          mvn -B package -DskipTests -U
+      - name: Extract version
+        id: extract-version
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+  test-maven:
+    name: Run unit tests
+    runs-on: ubuntu-latest
+    needs: [build-maven]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 #v7.0.0
+      - name: Set up JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 #v5.6.0
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: "maven"
+      - name: Cache maven target dir
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 #v6.1.0
         with:
           path: target
           key: ${{ runner.os }}-maven-target-${{ github.event.pull_request.head.sha || github.sha }}
           restore-keys: |
-            ${{ runner.os }}-maven-target-${{ github.event.pull_request.head.sha || github.sha }}
-  #     - name: Build with Maven
-  #       run: |
-  #         mvn -B package -DskipTests -U
-  #     - name: Extract version
-  #       id: extract-version
-  #       run: |
-  #         VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
-  #         echo "version=$VERSION" >> $GITHUB_OUTPUT
-  #
-  # test-maven:
-  #   name: Run unit tests
-  #   runs-on: ubuntu-latest
-  #   needs: [build-maven]
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
-  #     - name: Set up JDK
-  #       uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 #v5.2.0
-  #       with:
-  #         distribution: ${{ env.JAVA_DISTRIBUTION }}
-  #         java-version: ${{ env.JAVA_VERSION }}
-  #         cache: "maven"
-  #     - name: Cache maven target dir
-  #       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae #v5.0.5
-  #       with:
-  #         path: target
-  #         key: ${{ runner.os }}-maven-target-${{ github.sha }}
-  #         restore-keys: |
-  #           ${{ runner.os }}-maven-target-${{ github.sha }}
-  #     - name: Run tests
-  #       run: mvn -B test
-  #     - name: Upload test results
-  #       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #v7.0.1
-  #       if: always()
-  #       with:
-  #         name: test-results
-  #         path: |
-  #           **/target/surefire-reports/
+            ${{ runner.os }}-maven-target-${{ github.sha }}
+      - name: Run tests
+        run: mvn -B test
+      - name: Upload test results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #v7.0.1
+        if: always()
+        with:
+          name: test-results
+          path: |
+            **/target/surefire-reports/
+
+  build-push-image:
+    name: Build & push container image
+    runs-on: ubuntu-latest
+    needs: [build-maven, test-maven]
+    outputs:
+      image-digest: ${{ steps.build-push.outputs.digest }}
+      image-tag: ${{ steps.tag.outputs.image-tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 #v7.0.0
+      - name: Set up JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 #v5.6.0
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: "maven"
+      - name: Cache maven target dir
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 #v6.1.0
+        with:
+          path: target
+          key: ${{ runner.os }}-maven-target-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-maven-target-${{ github.sha }}
+      - name: Inject slug vars
+        uses: rlespinasse/github-slug-action@ef93b2ea4b6405d06fd8684fc3ff795d262ecae8 #v5.7.0
+      - name: Determine tag
+        id: tag
+        run: | # TODO: metadata-action
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "This workflow was triggered by workflow_dispatch."
+            export TAG=${{ github.event.inputs.tag }}
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "This workflow was triggered by a tag push ${GITHUB_REF}"
+            export TAG=$(echo ${GITHUB_REF} | sed 's|^refs/tags/||')
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "This workflow was triggered by a pull request."
+            export TAG=pr-${{ github.event.pull_request.number }}-${GITHUB_HEAD_REF_SLUG}
+          elif [[ "${GITHUB_REF_POINT_SLUG}" == "main" ]]; then
+            export TAG="latest"
+          else
+            export TAG=${GITHUB_REF_POINT_SLUG}
+          fi
+          echo "Image tag will be: ${TAG}"
+          echo "image-tag=${TAG}" >> "${GITHUB_OUTPUT}"
+      - name: Determine image labels
+        # Apply Quay expiry only to branch builds that are not main; tags stay permanent.
+        id: image-labels
+        run: |
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            echo "labels=" >> "${GITHUB_OUTPUT}"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "labels=" >> "${GITHUB_OUTPUT}"
+          else
+            echo "labels=quay.expires-after=60d" >> "${GITHUB_OUTPUT}"
+          fi
+      - name: Build image archive for pull request
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          BASE_IMAGE_ARG=""
+          if [[ -n "${{ vars.BASE_IMAGE }}" ]]; then
+            BASE_IMAGE_ARG="-Djib.from.image=${{ vars.BASE_IMAGE }}"
+          fi
+
+          mvn -B jib:buildTar -DskipTests \
+            -Djib.to.image=jumper \
+            ${BASE_IMAGE_ARG}
+      - name: Upload pull request image archive
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #v7.0.1
+        with:
+          name: pull-request-image
+          path: target/jib-image.tar
+          if-no-files-found: error
+          retention-days: 7
+      - name: Build and push
+        id: build-push
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          LABELS_ARG=""
+          if [[ -n "${{ steps.image-labels.outputs.labels }}" ]]; then
+            LABELS_ARG="-Djib.container.labels=${{ steps.image-labels.outputs.labels }}"
+          fi
+
+          BASE_IMAGE_ARG=""
+          if [[ -n "${{ vars.BASE_IMAGE }}" ]]; then
+            BASE_IMAGE_ARG="-Djib.from.image=${{ vars.BASE_IMAGE }}"
+          fi
+
+          mvn -B jib:build -DskipTests \
+            -Djib.to.image=${{ vars.REGISTRY_HOST }}${{ vars.REGISTRY_REPO }} \
+            -Djib.to.tags=${{ steps.tag.outputs.image-tag }} \
+            -Djib.to.auth.username=${{ secrets.ARTIFACTORY_O28M_PUSH_USER }} \
+            -Djib.to.auth.password=${{ secrets.ARTIFACTORY_O28M_PUSH_TOKEN }} \
+            ${BASE_IMAGE_ARG} \
+            ${LABELS_ARG}
+
+          # Extract the image digest from Jib's output
+          DIGEST=$(cat target/jib-image.digest)
+          echo "digest=${DIGEST}" >> "${GITHUB_OUTPUT}"
+      - name: Install Cosign
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 #v4.1.2
+        with:
+          cosign-release: "v2.5.3"
+      - name: Sign image using cosign
+        id: cosign-sign
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          echo "TAGS=${TAGS}"
+          echo "DIGEST=${DIGEST}"
+          images=""
+          for tag in ${TAGS}; do
+            images+="${{ env.REGISTRY}}${{ env.REGISTRY_REPO }}:${tag}@${DIGEST} "
+          done
+          echo "images=${images}" >> $GITHUB_OUTPUT
+          cosign login -u ${{ env.REGISTRY_USER }} -p ${{ env.REGISTRY_PASSWORD }} ${{ env.REGISTRY }}
+          cosign sign --key env://COSIGN_PRIVATE_KEY --tlog-upload=false ${images}
+        env:
+          TAGS: ${{ steps.tag.outputs.image-tag }}
+          DIGEST: ${{ steps.build-push.outputs.digest }}
+          REGISTRY: ${{ vars.REGISTRY_HOST }}
+          REGISTRY_REPO: ${{ vars.REGISTRY_REPO }}
+          REGISTRY_USER: ${{ secrets.ARTIFACTORY_O28M_PUSH_USER }}
+          REGISTRY_PASSWORD: ${{ secrets.ARTIFACTORY_O28M_PUSH_TOKEN }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+      - name: Verify signature
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          cosign verify --insecure-ignore-tlog=true --key env://COSIGN_PUBLIC_KEY ${IMAGES}
+        env:
+          IMAGES: ${{ steps.cosign-sign.outputs.images }}
+          COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
+
+  scan-image:
+    name: Scan image
+    runs-on: ubuntu-latest
+    needs: [build-push-image]
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: write
+    steps:
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 #v0.36.0
+        env:
+          TRIVY_USERNAME: ${{ secrets.ARTIFACTORY_O28M_PUSH_USER }}
+          TRIVY_PASSWORD: ${{ secrets.ARTIFACTORY_O28M_PUSH_TOKEN }}
+        with:
+          image-ref: "${{ vars.REGISTRY_HOST }}${{ vars.REGISTRY_REPO }}@${{ needs.build-push-image.outputs.image-digest }}"
+          exit-code: "0"
+          vuln-type: os # library findings are handled by ort and github auto submission
+          # Only push results to dependency graph if running on main
+          format: ${{ github.event_name == 'pull_request' && 'table' || 'github' }}
+          output: ${{ github.event_name == 'pull_request' && '' || 'dependency-results.sbom.json' }}
+          github-pat: ${{ secrets.GITHUB_TOKEN }}

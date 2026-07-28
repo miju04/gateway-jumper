@@ -1,0 +1,80 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom IT GmbH
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Promote PR Image
+
+on:
+  workflow_run:
+    workflows: [Build]
+    types: [completed]
+
+# This test workflow inspects images built by fork PRs and must never checkout
+# or execute PR code.
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+jobs:
+  promote:
+    name: Approve and inspect PR image
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name != github.repository
+    runs-on: ubuntu-latest
+    environment: external
+    steps:
+      - name: Resolve the pull request for the built commit
+        id: pull-request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          [[ "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          HEAD_OWNER="${HEAD_REPOSITORY%%/*}"
+
+          mapfile -t PR_NUMBERS < <(
+            gh api --method GET \
+              "/repos/${GITHUB_REPOSITORY}/pulls" \
+              -f state=open \
+              -f "head=${HEAD_OWNER}:${HEAD_BRANCH}" \
+              -f per_page=100 \
+              --jq '.[] | select(.head.sha == env.HEAD_SHA) | .number'
+          )
+
+          [[ "${#PR_NUMBERS[@]}" -eq 1 ]]
+          [[ "${PR_NUMBERS[0]}" =~ ^[0-9]+$ ]]
+          echo "number=${PR_NUMBERS[0]}" >> "${GITHUB_OUTPUT}"
+      - name: Create a slug from the PR branch
+        uses: rlespinasse/github-slug-action@ef93b2ea4b6405d06fd8684fc3ff795d262ecae8 #v5.7.0
+        env:
+          GITHUB_HEAD_REF: ${{ github.event.workflow_run.head_branch }}
+      - name: Determine image tag
+        id: tag
+        run: |
+          TAG="pr-${{ steps.pull-request.outputs.number }}-${GITHUB_HEAD_REF_SLUG}"
+          [[ "${TAG}" =~ ^[a-z0-9][a-z0-9._-]{0,127}$ ]]
+          echo "image-tag=${TAG}" >> "${GITHUB_OUTPUT}"
+      - name: Download the PR image archive
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 #v8.0.0
+        with:
+          name: pull-request-image
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: image
+      - name: Verify promotion secret access
+        env:
+          TEST_SECRET: ${{ secrets.TEST_SECRET }}
+        run: |
+          [[ -n "${TEST_SECRET}" ]]
+          echo "Promotion secret is available."
+      - name: Inspect PR image archive
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.image-tag }}
+        run: |
+          echo "Resolved image tag: ${IMAGE_TAG}"
+          skopeo inspect "docker-archive:image/jib-image.tar"

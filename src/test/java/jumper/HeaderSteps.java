@@ -7,6 +7,7 @@ package jumper;
 import static jumper.config.Config.*;
 import static jumper.util.JumperConfigUtil.addIdSuffix;
 import static jumper.util.TokenUtil.getConsumerAccessTokenWithAud;
+import static jumper.util.TokenUtil.getConsumerAccessTokenWithMultipleAud;
 
 import io.cucumber.java.ParameterType;
 import io.cucumber.java.en.And;
@@ -34,6 +35,25 @@ public class HeaderSteps {
   public void proxyRouteHeadersSetWithXtokenExchange() {
     baseSteps.authHeader = TokenUtil.getConsumerAccessToken();
     baseSteps.setHttpHeadersOfRequest(TokenUtil.getProxyRouteHeadersWithXtokenExchange(baseSteps));
+  }
+
+  @Given("ProxyRoute headers are set with legacy issuer")
+  public void proxyRouteHeadersSetWithLegacyIssuer() {
+    baseSteps.authHeader = TokenUtil.getConsumerAccessToken();
+    baseSteps.setHttpHeadersOfRequest(TokenUtil.getProxyRouteHeadersLegacyIssuer(baseSteps));
+  }
+
+  @Given("ProxyRoute headers are set with realm header")
+  public void proxyRouteHeadersSetWithRealmHeader() {
+    baseSteps.authHeader = TokenUtil.getConsumerAccessToken();
+    baseSteps.setHttpHeadersOfRequest(TokenUtil.getProxyRouteHeadersWithRealmHeader(baseSteps));
+  }
+
+  @Given("ProxyRoute headers are set with legacy issuer for non-default realm")
+  public void proxyRouteHeadersSetWithLegacyIssuerForNonDefaultRealm() {
+    baseSteps.authHeader = TokenUtil.getConsumerAccessToken();
+    baseSteps.setHttpHeadersOfRequest(
+        TokenUtil.getProxyRouteHeadersLegacyIssuerWithNonDefaultRealm(baseSteps));
   }
 
   @Given("A header {word} is set with value {word}")
@@ -95,6 +115,27 @@ public class HeaderSteps {
     baseSteps.setHttpHeadersOfRequest(RoutingConfigUtil.getProxyRouteHeaders(baseSteps));
   }
 
+  @Given("Proxy routing_config header set with legacy issuer")
+  public void proxyRoutingConfigHeaderSetWithLegacyIssuer() {
+    baseSteps.authHeader = TokenUtil.getConsumerAccessToken();
+    baseSteps.setHttpHeadersOfRequest(
+        RoutingConfigUtil.getProxyRouteHeadersLegacyIssuer(baseSteps));
+  }
+
+  @Given("Proxy routing_config header set with realm header")
+  public void proxyRoutingConfigHeaderSetWithRealmHeader() {
+    baseSteps.authHeader = TokenUtil.getConsumerAccessToken();
+    baseSteps.setHttpHeadersOfRequest(
+        RoutingConfigUtil.getProxyRouteHeadersWithRealmHeader(baseSteps));
+  }
+
+  @Given("Proxy routing_config header set with legacy issuer for non-default realm")
+  public void proxyRoutingConfigHeaderSetWithLegacyIssuerForNonDefaultRealm() {
+    baseSteps.authHeader = TokenUtil.getConsumerAccessToken();
+    baseSteps.setHttpHeadersOfRequest(
+        RoutingConfigUtil.getProxyRouteHeadersLegacyIssuerWithNonDefaultRealm(baseSteps));
+  }
+
   @Given("RealRoute headers without Authorization are set")
   public void realRouteHeadersNoAuth() {
     baseSteps.setHttpHeadersOfRequest(TokenUtil.getRealRouteHeaders());
@@ -147,6 +188,13 @@ public class HeaderSteps {
             httpHeaders -> httpHeaders.setBearerAuth(getConsumerAccessTokenWithAud())));
   }
 
+  @And("authorization token with multiple aud set")
+  public void setAuthorizationWithMultipleAud() {
+    baseSteps.setHttpHeadersOfRequest(
+        baseSteps.httpHeadersOfRequest.andThen(
+            httpHeaders -> httpHeaders.setBearerAuth(getConsumerAccessTokenWithMultipleAud())));
+  }
+
   @And("technical headers added")
   public void addTechnicalHeaders() {
     baseSteps.setHttpHeadersOfRequest(
@@ -159,6 +207,17 @@ public class HeaderSteps {
               httpHeaders.add("x-anonymous-consumer", "dummy");
               httpHeaders.add("x-anonymous-groups", "dummy");
               httpHeaders.add("x-forwarded-prefix", "dummy");
+            }));
+  }
+
+  @And("documented consumer headers are set")
+  public void addDocumentedConsumerHeaders() {
+    baseSteps.setHttpHeadersOfRequest(
+        baseSteps.httpHeadersOfRequest.andThen(
+            httpHeaders -> {
+              httpHeaders.set(Constants.HEADER_X_FORWARDED_FOR, FORWARDED_FOR);
+              httpHeaders.set(Constants.HEADER_X_FORWARDED_PATH, FORWARDED_PATH);
+              httpHeaders.set(CUSTOM_CONSUMER_HEADER, CUSTOM_CONSUMER_HEADER_VALUE);
             }));
   }
 
